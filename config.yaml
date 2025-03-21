@@ -1,0 +1,33 @@
+# Configuration for Morpheus Virtual Assistant
+
+whisper:
+  model_name: "small.en"          # Name of the Whisper model used for speech recognition.
+  sample_rate: 16000              # Audio sample rate (Hz) for recording.
+
+lm_studio_api:
+  api_url: "http://127.0.0.1:1234"  # Base URL for the LM Studio API.
+  chat:
+    endpoint: "/v1/chat/completions"         # API endpoint for chat-based text generation.
+    model: "gemma-3-1b-it"                     # Model ID for text generation (Gemma).
+    system_prompt: "You are a smart assistant with a knack for humor."
+      # System prompt to guide Gemma's responses.
+    max_tokens: 2500                         # Maximum tokens to generate for chat responses.
+    temperature: 0.7                         # Sampling temperature (controls randomness).
+    # Optional parameters; remove or ignore if your model does not support them.
+    top_p: 0.9                               # Top-p (nucleus) sampling parameter.
+    repetition_penalty: 1.1                  # Penalty to reduce repetitive text.
+  tts:
+    endpoint: "/v1/completions"              # API endpoint for text-to-speech synthesis.
+    model: "orpheus-3b-0.1-ft"               # Model ID for TTS (Orpheus).
+    default_voice: "tara"                    # Default TTS voice.
+    max_tokens: 2500                         # Maximum tokens to generate for TTS output.
+    temperature: 0.6                         # Sampling temperature for TTS.
+    top_p: 0.9                               # Top-p sampling parameter for TTS.
+    repetition_penalty: 1.0                  # Repetition penalty for TTS generation.
+
+tts:
+  sample_rate: 24000            # Audio sample rate (Hz) for TTS output.
+
+audio:
+  input_device: 15              # Audio input device ID (e.g., NVidia Broadcast via Windows DirectSound).
+  output_device: 21             # Audio output device ID (e.g., Corsair Void Elite via Windows DirectSound).
