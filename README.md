@@ -1,19 +1,23 @@
 # mOrpheus Virtual Assistant Demo
 
-This project implements the Morpheus Virtual Assistant, which integrates speech recognition, text generation, and text-to-speech (TTS) synthesis. The assistant utilizes the following components:
+This project implements the **mOrpheus Virtual Assistant**, which integrates speech recognition, text generation, and text-to-speech (TTS) synthesis. The assistant utilizes the following components:
 
 - **Whisper** for speech recognition.
 - **LM Studio API** for text generation (chat) and text-to-speech.
 - **SNAC-based decoder** to convert TTS token streams into PCM audio.
 
-## Features
+---
+
+## 🚀 Features
 
 - **Speech Recognition:** Captures audio input from the microphone and transcribes it using the Whisper model.
 - **Text Generation:** Uses LM Studio’s chat API to generate responses based on the transcribed input.
 - **Text-to-Speech:** Synthesizes speech from text using LM Studio’s TTS API and decodes the token stream with a SNAC-based decoder.
 - **Audio Playback:** Plays the generated audio and checks its duration to warn if the audio might be truncated.
 
-## Requirements
+---
+
+## 📦 Requirements
 
 - Python 3.7+
 - [PyTorch](https://pytorch.org/)
@@ -26,80 +30,132 @@ This project implements the Morpheus Virtual Assistant, which integrates speech 
 - [Transformers](https://huggingface.co/transformers/)
 - [SNAC](https://github.com/hubertsiuzdak/snac) (or your local version)
 
-## Setup
+---
 
-1. **Clone the repository:**
+## ✅ Setup
 
-   ```bash
-   git clone https://github.com/yourusername/morpheus-virtual-assistant.git
-   cd morpheus-virtual-assistant
-   ```
+1. **Clone the repository**:
 
-2. **Install the dependencies:**
+```bash
+git clone https://github.com/yourusername/morpheus-virtual-assistant.git
+cd morpheus-virtual-assistant
+```
 
-   ```bash
-   pip install -r requirements.txt
-   ```
+2. **Create and activate a virtual environment**:
 
-   *Ensure that your `requirements.txt` includes all required packages.*
+**On Linux/macOS**:
 
-3. **Configure the application:**
+```bash
+python3 -m venv venv
+source venv/bin/activate
+```
 
-   - Create a `config.yaml` file in the project root.
-   - Populate it with your configuration details for Whisper, LM Studio API, audio settings, etc.
+**On Windows**:
 
-   Example `config.yaml`:
+```bash
+python -m venv venv
+venv\Scripts\activate
+```
 
-   ```yaml
-   whisper:
-     model_name: "base"
-     sample_rate: 16000
+3. **Install the dependencies**:
 
-   lm_studio_api:
-     api_url: "http://your-api-url.com"
-     chat:
-       endpoint: "/v1/chat"
-       model: "gemma"
-       system_prompt: "You are a helpful assistant."
-       max_tokens: 150
-       temperature: 0.7
-       top_p: 0.9
-       repetition_penalty: 1.0
-     tts:
-       endpoint: "/v1/tts"
-       model: "orpheus"
-       default_voice: "default"
-       max_tokens: 200
-       temperature: 0.8
+```bash
+pip install -r requirements.txt
+```
 
-   tts:
-     sample_rate: 24000
+> ⚠️ Ensure your `requirements.txt` includes all required packages.  
+> Example:
 
-   audio:
-     input_device: null
-     output_device: null
+```txt
+torch
+whisper
+sounddevice
+scipy
+numpy
+requests
+PyYAML
+transformers
+```
 
-   desired_tts_duration: 20
-   ```
+4. **(Optional) Find your audio input/output device IDs**:
 
-4. **Run the Assistant:**
+You can use this Python snippet to list available audio devices:
 
-   ```bash
-   python morpheus_demo.py
-   ```
-Make sure you have your choosen LLM model and the Orpheus 4-bit GGUF loaded inside LM Studio and that you are in API mode. 
+```python
+import sounddevice as sd
+print(sd.query_devices())
+```
 
-## Usage
+Look for the index numbers next to your desired microphone (input) and speaker (output), then set them in your `config.yaml`:
+
+```yaml
+audio:
+  input_device: 1   # Replace with your mic ID
+  output_device: 3  # Replace with your speaker ID
+```
+
+5. **Configure the application**:
+
+Create a `config.yaml` file in the project root and populate it with your settings:
+
+```yaml
+whisper:
+  model_name: "small.en"
+  sample_rate: 16000
+
+lm_studio_api:
+  api_url: "http://127.0.0.1:1234"
+  chat:
+    endpoint: "/v1/chat/completions"
+    model: "gemma-3-1b-it"
+    system_prompt: "You are a smart assistant with a knack for humor."
+    max_tokens: 2500
+    temperature: 0.7
+    top_p: 0.9
+    repetition_penalty: 1.1
+  tts:
+    endpoint: "/v1/completions"
+    model: "orpheus-3b-0.1-ft"
+    default_voice: "tara"
+    max_tokens: 2500
+    temperature: 0.6
+    top_p: 0.9
+    repetition_penalty: 1.0
+
+tts:
+  sample_rate: 24000
+
+audio:
+  input_device: 15
+  output_device: 21
+```
+
+6. **Run the Assistant**:
+
+```bash
+python morpheus_demo.py
+```
+
+> ✅ Make sure your chosen LLM model and the **Orpheus 4-bit GGUF** are loaded in LM Studio, and that LM Studio is in **API mode**.
+
+---
+
+## 🗣️ Usage
 
 - The assistant will begin by listening for your voice input.
 - After transcribing your speech, it will generate a text response using the LM Studio API.
 - The response is then converted to speech using the TTS API, decoded via SNAC, and played back.
-- If the generated audio duration is below the configured threshold, a warning is printed.
+- If the generated audio duration is below the configured threshold, a warning will be shown.
 
-## Contributing
+---
 
-Feel free to open issues or submit pull requests with improvements or bug fixes.
+## 🤝 Contributing
 
-## License
+Feel free to open issues or submit pull requests with improvements, features, or bug fixes!
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+---
+
+## 📄 License
+
+This project is licensed under the **MIT License**.  
+See the [LICENSE](LICENSE) file for full details.
