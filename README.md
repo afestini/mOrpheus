@@ -1,6 +1,6 @@
 # mOrpheus Virtual Assistant Demo
 
-This project implements the **mOrpheus Virtual Assistant**, which integrates speech recognition, text generation, and text-to-speech (TTS) synthesis. The assistant utilizes the following components:
+This project is a proof of concept called **mOrpheus**, which integrates speech recognition, text generation, and text-to-speech (TTS) synthesis using LM Studio as a backend. The assistant utilizes the following components:
 
 - **Whisper** for speech recognition.
 - **LM Studio API** for text generation (chat) and text-to-speech.
