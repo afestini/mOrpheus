@@ -32,7 +32,7 @@ This project implements the mOrpheus Virtual Assistant, which integrates speech 
 - [requests](https://docs.python-requests.org/)
 - [PyYAML](https://pyyaml.org/)
 - [Transformers](https://huggingface.co/transformers/)
-- [SNAC](https://github.com/hubertsiuzdak/snac) (or your local version)
+- [SNAC](https://github.com/hubertsiuzdak/snac)
 
 ## Setup
 
