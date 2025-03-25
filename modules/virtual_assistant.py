@@ -1,60 +1,138 @@
-import wave
+# modules/virtual_assistant.py
+
+import os
 import time
+import wave
 import numpy as np
 import sounddevice as sd
-from .whisper_recognizer import WhisperRecognizer
-from .lmstudio_client import LMStudioClient
+from typing import Optional
+from modules.logging import logger
+from modules.whisper_recognizer import WhisperRecognizer
+from modules.lm_client import LMStudioClient
+from modules.hotword_detector import HotwordDetector
+from modules.performance import PerformanceMonitor
+from modules.config import load_config
 
 class VirtualAssistant:
-    """
-    The main virtual assistant class that integrates Whisper, LM Studio API for chat and TTS,
-    and decodes TTS tokens into audio using the SNAC-based decoder.
-    """
-    def __init__(self, config):
+    def __init__(self, config_path: str = "settings.yml"):
+        self.config = load_config(config_path)
         self.recognizer = WhisperRecognizer(
-            model_name=config["whisper"]["model_name"],
-            sample_rate=config["whisper"]["sample_rate"]
+            model_name=self.config["whisper"]["model"],
+            sample_rate=self.config["whisper"]["sample_rate"],
+            config=self.config
         )
-        self.lm_client = LMStudioClient(
-            config_lm_api=config["lm_studio_api"],
-            tts_sample_rate=config["tts"]["sample_rate"]
-        )
-        self.input_device = config.get("audio", {}).get("input_device", None)
-        self.output_device = config.get("audio", {}).get("output_device", None)
-        self.desired_tts_duration = config.get("desired_tts_duration", 20)
-
-    def play_audio(self, filename):
-        print("▶️ Playing audio...")
-        with wave.open(filename, "rb") as wf:
-            sample_rate = wf.getframerate()
-            audio_data = wf.readframes(wf.getnframes())
-            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32767.0
-            sd.play(audio_array, sample_rate, device=self.output_device)
-            sd.wait()
-
-    def get_wav_duration(self, filename):
-        with wave.open(filename, "rb") as wf:
-            frames = wf.getnframes()
-            rate = wf.getframerate()
-            return frames / float(rate)
+        self.lm_client = LMStudioClient(self.config)
+        # Always initialize hotword detector if enabled in config
+        self.hotword_detector = HotwordDetector(config=self.config) if self.config["hotword"]["enabled"] else None
+        self.performance = PerformanceMonitor()
+        self._running = False
 
     def run(self):
-        print("\n🔄 Starting the virtual assistant. Press Ctrl+C to exit.\n")
+        self._running = True
+        logger.info("Assistant started. Press ENTER or say '%s' to interact.", self.config["hotword"]["phrase"])
+        
         try:
-            while True:
-                user_text = self.recognizer.transcribe(duration=5, device=self.input_device)
-                if not user_text.strip():
-                    print("⚠️ No speech detected. Please try again.")
-                    continue
-                response_text = self.lm_client.generate_text(user_text)
-                audio_file = self.lm_client.synthesize_speech(
-                    response_text,
-                    desired_tts_duration=self.desired_tts_duration
-                )
-                duration = self.get_wav_duration(audio_file)
-                print(f"Audio duration: {duration:.2f} seconds.")
-                self.play_audio(audio_file)
-                print("Waiting extra 1 second after playback to ensure full audio is played.")
-                time.sleep(duration + 1.0)
+            while self._running:
+                try:
+                    if not self._wait_for_activation():
+                        continue
+                    # Record and process user input
+                    user_text = self.recognizer.transcribe()
+                    if not user_text:
+                        logger.warning("No speech detected.")
+                        continue
+                    # Get and process response
+                    response_text = self.lm_client.chat(user_text)
+                    self.performance.add_tokens(len(response_text.split()))
+                    
+                    # Synthesize speech
+                    word_count = len(response_text.split())
+                    if word_count > self.config["segmentation"]["max_words"]:
+                        logger.info("Response is long (%d words). Segmenting...", word_count)
+                        output_file = self.lm_client.synthesize_long_text(response_text)
+                    else:
+                        output_file = self.lm_client.synthesize_speech(response_text)
+                    
+                    # Play audio and wait for the activation signal before next loop
+                    self.play_audio(output_file)
+                    self._wait_for_activation()  # Wait again after audio playback
+                except Exception as e:
+                    logger.error("Error in main loop: %s", str(e))
+                    time.sleep(1)
+                    
         except KeyboardInterrupt:
-            print("\n👋 Exiting gracefully. Goodbye!")
+            logger.info("Exiting assistant. Goodbye!")
+        finally:
+            try:
+                self.performance.report(force=True)
+            except Exception as e:
+                logger.error("Error in performance report: %s", str(e))
+            self._running = False
+
+    def stop(self):
+        self._running = False
+
+    def _flush_stdin(self):
+        """Flush any lingering input from stdin."""
+        try:
+            import sys
+            import termios
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception:
+            try:
+                import msvcrt
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+            except Exception:
+                pass
+
+    def _wait_for_activation(self) -> bool:
+        """
+        Wait for activation either by detecting a keypress (push-to-talk)
+        or by detecting the hotword, whichever comes first.
+        """
+        logger.info("Waiting for activation: press ENTER or say the hotword...")
+        hotword_timeout = self.config["hotword"]["timeout_sec"] if self.hotword_detector else 0
+        elapsed = 0.0
+        check_interval = 0.5
+        while elapsed < hotword_timeout:
+            if self._check_for_keypress():
+                self._flush_stdin()
+                return True
+            if self.hotword_detector and self.hotword_detector.check_for_hotword(timeout=check_interval):
+                return True
+            time.sleep(check_interval)
+            elapsed += check_interval
+        # Fallback to blocking push-to-talk input if neither hotword nor keypress detected within the timeout
+        input("Press ENTER to speak...")
+        return True
+
+    def _check_for_keypress(self) -> bool:
+        """Non-blocking keypress check."""
+        try:
+            import msvcrt  # Windows
+            return msvcrt.kbhit()
+        except ImportError:
+            import sys
+            import select  # Unix
+            return sys.stdin in select.select([sys.stdin], [], [], 0)[0]
+
+    def play_audio(self, filename: str):
+        """Play audio with normalization and error handling."""
+        if not os.path.exists(filename):
+            logger.error("Audio file not found: %s", filename)
+            return
+        try:
+            with wave.open(filename, "rb") as wf:
+                sample_rate = wf.getframerate()
+                audio_data = wf.readframes(wf.getnframes())
+            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32767.0
+            if self.config["speech"]["normalize_audio"]:
+                max_val = np.max(np.abs(audio_array))
+                if max_val > 0:
+                    audio_array = audio_array / max_val
+            sd.play(audio_array, samplerate=sample_rate)
+            sd.wait()
+        except Exception as e:
+            logger.error("Audio playback error: %s", str(e))
+            raise

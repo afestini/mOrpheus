@@ -1,121 +1,92 @@
+# modules/snac_decoder.py
+
+import time
 import torch
 import numpy as np
-import asyncio
-import threading
-import queue
-from snac import SNAC
+from modules.logging import logger
+from snac import SNAC  # Ensure that the snac module is installed
 
-# Monkey-Patch torch.load to use weights_only=True by default
-original_torch_load = torch.load
-def patched_torch_load(*args, **kwargs):
-    kwargs.setdefault("weights_only", True)
-    return original_torch_load(*args, **kwargs)
-torch.load = patched_torch_load
-
-# Load the SNAC model used for decoding LM Studio TTS tokens into PCM audio.
+# Load SNAC model
 snac_model = SNAC.from_pretrained("hubertsiuzdak/snac_24khz").eval()
 snac_device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using SNAC on device: {snac_device}")
+logger.info("Using SNAC on device: %s", snac_device)
 snac_model = snac_model.to(snac_device)
+cuda_stream = torch.cuda.Stream() if snac_device == "cuda" else None
 
 def convert_to_audio(multiframe, count):
     if len(multiframe) < 7:
-        return
-    codes_0 = torch.tensor([], device=snac_device, dtype=torch.int32)
-    codes_1 = torch.tensor([], device=snac_device, dtype=torch.int32)
-    codes_2 = torch.tensor([], device=snac_device, dtype=torch.int32)
+        return None
     num_frames = len(multiframe) // 7
-    frame = multiframe[:num_frames*7]
+    frame = multiframe[:num_frames * 7]
+    codes_0 = torch.zeros(num_frames, dtype=torch.int32, device=snac_device)
+    codes_1 = torch.zeros(num_frames * 2, dtype=torch.int32, device=snac_device)
+    codes_2 = torch.zeros(num_frames * 4, dtype=torch.int32, device=snac_device)
+    frame_tensor = torch.tensor(frame, dtype=torch.int32, device=snac_device)
     for j in range(num_frames):
-        i = 7 * j
-        if codes_0.shape[0] == 0:
-            codes_0 = torch.tensor([frame[i]], device=snac_device, dtype=torch.int32)
-        else:
-            codes_0 = torch.cat([codes_0, torch.tensor([frame[i]], device=snac_device, dtype=torch.int32)])
-        if codes_1.shape[0] == 0:
-            codes_1 = torch.tensor([frame[i+1]], device=snac_device, dtype=torch.int32)
-            codes_1 = torch.cat([codes_1, torch.tensor([frame[i+4]], device=snac_device, dtype=torch.int32)])
-        else:
-            codes_1 = torch.cat([codes_1, torch.tensor([frame[i+1]], device=snac_device, dtype=torch.int32)])
-            codes_1 = torch.cat([codes_1, torch.tensor([frame[i+4]], device=snac_device, dtype=torch.int32)])
-        if codes_2.shape[0] == 0:
-            codes_2 = torch.tensor([frame[i+2]], device=snac_device, dtype=torch.int32)
-            codes_2 = torch.cat([codes_2, torch.tensor([frame[i+3]], device=snac_device, dtype=torch.int32)])
-            codes_2 = torch.cat([codes_2, torch.tensor([frame[i+5]], device=snac_device, dtype=torch.int32)])
-            codes_2 = torch.cat([codes_2, torch.tensor([frame[i+6]], device=snac_device, dtype=torch.int32)])
-        else:
-            codes_2 = torch.cat([codes_2, torch.tensor([frame[i+2]], device=snac_device, dtype=torch.int32)])
-            codes_2 = torch.cat([codes_2, torch.tensor([frame[i+3]], device=snac_device, dtype=torch.int32)])
-            codes_2 = torch.cat([codes_2, torch.tensor([frame[i+5]], device=snac_device, dtype=torch.int32)])
-            codes_2 = torch.cat([codes_2, torch.tensor([frame[i+6]], device=snac_device, dtype=torch.int32)])
+        idx = j * 7
+        codes_0[j] = frame_tensor[idx]
+        codes_1[j * 2] = frame_tensor[idx + 1]
+        codes_1[j * 2 + 1] = frame_tensor[idx + 4]
+        codes_2[j * 4] = frame_tensor[idx + 2]
+        codes_2[j * 4 + 1] = frame_tensor[idx + 3]
+        codes_2[j * 4 + 2] = frame_tensor[idx + 5]
+        codes_2[j * 4 + 3] = frame_tensor[idx + 6]
     codes = [codes_0.unsqueeze(0), codes_1.unsqueeze(0), codes_2.unsqueeze(0)]
-    if torch.any(codes[0] < 0) or torch.any(codes[0] > 4096) or \
-       torch.any(codes[1] < 0) or torch.any(codes[1] > 4096) or \
-       torch.any(codes[2] < 0) or torch.any(codes[2] > 4096):
-        return
-    with torch.inference_mode():
+    if (torch.any(codes[0] < 0) or torch.any(codes[0] > 4096) or
+        torch.any(codes[1] < 0) or torch.any(codes[1] > 4096) or
+        torch.any(codes[2] < 0) or torch.any(codes[2] > 4096)):
+        return None
+    stream_ctx = torch.cuda.stream(cuda_stream) if cuda_stream is not None else torch.no_grad()
+    with stream_ctx, torch.inference_mode():
         audio_hat = snac_model.decode(codes)
-    audio_slice = audio_hat[:, :, 2048:4096]
-    detached_audio = audio_slice.detach().cpu()
-    audio_np = detached_audio.numpy()
-    audio_int16 = (audio_np * 32767).astype(np.int16)
-    audio_bytes = audio_int16.tobytes()
+        audio_slice = audio_hat[:, :, 2048:4096]
+        if snac_device == "cuda":
+            audio_int16_tensor = (audio_slice * 32767).to(torch.int16)
+            audio_bytes = audio_int16_tensor.cpu().numpy().tobytes()
+        else:
+            audio_np = audio_slice.detach().cpu().numpy()
+            audio_int16 = (audio_np * 32767).astype(np.int16)
+            audio_bytes = audio_int16.tobytes()
     return audio_bytes
 
 def turn_token_into_id(token_string, index):
     token_string = token_string.strip()
-    last_token_start = token_string.rfind("<custom_token_")
-    if last_token_start == -1:
-        print("No token found in the string")
+    if "<custom_token_" not in token_string:
         return None
-    last_token = token_string[last_token_start:]
-    if last_token.startswith("<custom_token_") and last_token.endswith(">"):
-        try:
-            number_str = last_token[14:-1]
-            return int(number_str) - 10 - ((index % 7) * 4096)
-        except ValueError:
-            return None
-    else:
+    last_token_start = token_string.rfind("<custom_token_")
+    if last_token_start == -1 or not token_string.endswith(">"):
+        return None
+    try:
+        number_str = token_string[last_token_start + 14:-1]
+        return int(number_str) - 10 - ((index % 7) * 4096)
+    except (ValueError, IndexError):
         return None
 
-async def tokens_decoder(token_gen):
+token_cache = {}
+MAX_CACHE_SIZE = 1000
+
+def tokens_decoder(token_gen):
     buffer = []
     count = 0
-    async for token_text in token_gen:
-        token = turn_token_into_id(token_text, count)
-        if token is None:
-            continue
-        if token > 0:
+    min_frames_required = 28
+    process_every = 7
+    for token_text in token_gen:
+        cache_key = (token_text, count % 7)
+        if cache_key in token_cache:
+            token = token_cache[cache_key]
+        else:
+            token = turn_token_into_id(token_text, count)
+            if token is not None and len(token_cache) < MAX_CACHE_SIZE:
+                token_cache[cache_key] = token
+        if token is not None and token > 0:
             buffer.append(token)
             count += 1
-            if count % 7 == 0 and count > 27:
-                buffer_to_proc = buffer[-28:]
+            if count % process_every == 0 and count >= min_frames_required:
+                buffer_to_proc = buffer[-min_frames_required:]
                 audio_samples = convert_to_audio(buffer_to_proc, count)
                 if audio_samples is not None:
                     yield audio_samples
 
 def tokens_decoder_sync(syn_token_gen):
-    audio_queue = queue.Queue()
-
-    async def async_token_gen():
-        for token in syn_token_gen:
-            yield token
-
-    async def async_producer():
-        async for audio_chunk in tokens_decoder(async_token_gen()):
-            audio_queue.put(audio_chunk)
-        audio_queue.put(None)  # Sentinel
-
-    def run_async():
-        asyncio.run(async_producer())
-
-    thread = threading.Thread(target=run_async)
-    thread.start()
-    audio_segments = []
-    while True:
-        audio = audio_queue.get()
-        if audio is None:
-            break
-        audio_segments.append(audio)
-    thread.join()
+    audio_segments = list(tokens_decoder(syn_token_gen))
     return b"".join(audio_segments)
