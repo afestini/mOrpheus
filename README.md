@@ -1,3 +1,8 @@
+# Status Update
+
+I'm finishing up the last month or so of university, so my progression will likely be non-existent on this. I suggest using the latest Dev tree build. 
+
+# ------------
 # mOrpheus Virtual Assistant Demo
 
 This project implements the mOrpheus Virtual Assistant, which integrates speech recognition, text generation, and text-to-speech (TTS) synthesis. The assistant leverages several state-of-the-art components:
