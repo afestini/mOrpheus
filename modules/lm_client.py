@@ -2,11 +2,8 @@
 import lmstudio as lms
 import sounddevice as sd
 import re
-from typing import Optional
-from modules.logging import logger
-from modules.audio import segment_text, combine_audio_files
+from modules.audio import segment_text
 from modules.snac_decoder import tokens_decoder
-from modules.config import load_config
 
 def clean_text_for_tts(text: str) -> str:
     """
@@ -76,15 +73,10 @@ class LMStudioClient:
             yield fragment.content
 
 
-    def synthesize_speech(self, text: str, voice: Optional[str] = None) -> str:
-        voice = voice if voice else self.default_voice
-        if not voice.isalpha() or len(voice) > 20:
-            logger.warning("Invalid voice name '%s', using default", voice)
-            voice = self.default_voice
-
+    def synthesize_speech(self, text: str) -> str:
         # Clean the text for TTS
         cleaned_text = clean_text_for_tts(text)
-        prompt = f"<|audio|>{voice}: {cleaned_text}<|eot_id|>"
+        prompt = f"<|audio|>{self.default_voice}: {cleaned_text}<|eot_id|>"
         def token_generator():
             for fragment in self.lms_tts.complete_stream(prompt):
                 yield fragment.content
@@ -93,11 +85,11 @@ class LMStudioClient:
             self.stream.write(samples)
 
 
-    def synthesize_long_text(self, text: str, voice: Optional[str] = None) -> str:
+    def synthesize_long_text(self, text: str) -> str:
         word_limit = self.config["segmentation"]["max_words"]
         segments = segment_text(text, max_words = word_limit)
         for i, seg in enumerate(segments):
             if i + 1 == len(segments) and len(seg) < word_limit * 3:
                 return seg
-            self.synthesize_speech(seg, voice=voice)
+            self.synthesize_speech(seg)
         return ''

@@ -1,16 +1,9 @@
 # modules/virtual_assistant.py
-
-import os
 import time
-import wave
-import numpy as np
-import sounddevice as sd
-from typing import Optional
 from modules.logging import logger
 from modules.whisper_recognizer import WhisperRecognizer
 from modules.lm_client import LMStudioClient
 from modules.hotword_detector import HotwordDetector
-from modules.performance import PerformanceMonitor
 from modules.config import load_config
 
 class VirtualAssistant:
@@ -24,7 +17,6 @@ class VirtualAssistant:
         self.lm_client = LMStudioClient(self.config)
         # Always initialize hotword detector if enabled in config
         self.hotword_detector = HotwordDetector(config=self.config) if self.config["hotword"]["enabled"] else None
-        self.performance = PerformanceMonitor()
         self.word_limit = self.config["segmentation"]["max_words"]
         self._running = False
 
@@ -113,23 +105,3 @@ class VirtualAssistant:
             import sys
             import select  # Unix
             return sys.stdin in select.select([sys.stdin], [], [], 0)[0]
-
-    def play_audio(self, filename: str):
-        """Play audio with normalization and error handling."""
-        if not os.path.exists(filename):
-            logger.error("Audio file not found: %s", filename)
-            return
-        try:
-            with wave.open(filename, "rb") as wf:
-                sample_rate = wf.getframerate()
-                audio_data = wf.readframes(wf.getnframes())
-            audio_array = np.frombuffer(audio_data, dtype=np.int16).astype(np.float32) / 32767.0
-            if self.config["speech"]["normalize_audio"]:
-                max_val = np.max(np.abs(audio_array))
-                if max_val > 0:
-                    audio_array = audio_array / max_val
-            sd.play(audio_array, samplerate=sample_rate)
-            sd.wait()
-        except Exception as e:
-            logger.error("Audio playback error: %s", str(e))
-            raise

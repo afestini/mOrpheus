@@ -1,6 +1,4 @@
 # modules/snac_decoder.py
-
-import time
 import torch
 import numpy as np
 from modules.logging import logger
@@ -13,7 +11,8 @@ logger.info("Using SNAC on device: %s", snac_device)
 snac_model = snac_model.to(snac_device)
 cuda_stream = torch.cuda.Stream() if snac_device == "cuda" else None
 
-def convert_to_audio(multiframe, count):
+
+def convert_to_audio(multiframe):
     if len(multiframe) < 7:
         return None
     num_frames = len(multiframe) // 7
@@ -42,6 +41,7 @@ def convert_to_audio(multiframe, count):
         audio_slice = audio_hat[:, :, 2048:4096].cpu()
     return audio_slice.squeeze().cpu().numpy().astype(np.float32)
 
+
 def turn_token_into_id(token_string, index):
     token_string = token_string.strip()
     if "<custom_token_" not in token_string:
@@ -58,12 +58,14 @@ def turn_token_into_id(token_string, index):
 token_cache = {}
 MAX_CACHE_SIZE = 1000
 
-def tokens_decoder(token_gen):
+
+def tokens_decoder(response_stream):
     buffer = []
     count = 0
     min_frames_required = 28
     process_every = 7
-    for token_text in token_gen:
+    for fragment in response_stream:
+        token_text = fragment.content
         cache_key = (token_text, count % 7)
         if cache_key in token_cache:
             token = token_cache[cache_key]
@@ -76,10 +78,6 @@ def tokens_decoder(token_gen):
             count += 1
             if count % process_every == 0 and count >= min_frames_required:
                 buffer_to_proc = buffer[-min_frames_required:]
-                audio_samples = convert_to_audio(buffer_to_proc, count)
+                audio_samples = convert_to_audio(buffer_to_proc)
                 if audio_samples is not None:
                     yield audio_samples
-
-def tokens_decoder_sync(syn_token_gen):
-    audio_segments = list(tokens_decoder(syn_token_gen))
-    return b"".join(audio_segments)

@@ -3,8 +3,6 @@ from typing import Optional
 import os
 import time
 import torch
-import numpy as np
-import sounddevice as sd
 from scipy.io.wavfile import write as wav_write
 import tempfile
 import whisper

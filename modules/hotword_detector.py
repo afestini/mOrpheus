@@ -4,7 +4,6 @@ from typing import Optional
 import os
 import numpy as np
 import sounddevice as sd
-import time
 import tempfile
 import whisper
 from scipy.io.wavfile import write as wav_write

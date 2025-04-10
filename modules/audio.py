@@ -1,7 +1,5 @@
 # modules/audio.py
-import os
 import time
-import wave
 import numpy as np
 import sounddevice as sd
 import webrtcvad
@@ -66,23 +64,3 @@ def segment_text(text, max_words=DEFAULT_MAX_WORDS_PER_SEGMENT):
     if words:
         segments.append(" ".join(words).strip())
     return segments
-
-def combine_audio_files(file_list, output_file):
-    """
-    Combines multiple WAV files into one.
-    """
-    if not file_list:
-        return None
-    try:
-        with wave.open(file_list[0], "rb") as wf:
-            params = wf.getparams()
-        with wave.open(output_file, "wb") as out_wf:
-            out_wf.setparams(params)
-            for f in file_list:
-                with wave.open(f, "rb") as wf:
-                    out_wf.writeframes(wf.readframes(wf.getnframes()))
-        logger.info("Combined audio written to %s", output_file)
-        return output_file
-    except Exception as e:
-        logger.error("Error combining audio files: %s", str(e))
-        raise
