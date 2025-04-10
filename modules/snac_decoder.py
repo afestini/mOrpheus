@@ -43,41 +43,29 @@ def convert_to_audio(multiframe):
 
 
 def turn_token_into_id(token_string, index):
-    token_string = token_string.strip()
-    if "<custom_token_" not in token_string:
-        return None
-    last_token_start = token_string.rfind("<custom_token_")
-    if last_token_start == -1 or not token_string.endswith(">"):
-        return None
-    try:
-        number_str = token_string[last_token_start + 14:-1]
+    if token_string.startswith("<custom_token_") and token_string.endswith(">"):
+        number_str = token_string[14:-1]
         return int(number_str) - 10 - ((index % 7) * 4096)
-    except (ValueError, IndexError):
-        return None
-
-token_cache = {}
-MAX_CACHE_SIZE = 1000
+    return 0
 
 
 def tokens_decoder(response_stream):
     buffer = []
     count = 0
+    processed_count = 0
     min_frames_required = 28
     process_every = 7
     for fragment in response_stream:
-        token_text = fragment.content
-        cache_key = (token_text, count % 7)
-        if cache_key in token_cache:
-            token = token_cache[cache_key]
-        else:
-            token = turn_token_into_id(token_text, count)
-            if token is not None and len(token_cache) < MAX_CACHE_SIZE:
-                token_cache[cache_key] = token
-        if token is not None and token > 0:
+        token = turn_token_into_id(fragment.content, count)
+        if token > 0:
             buffer.append(token)
             count += 1
             if count % process_every == 0 and count >= min_frames_required:
+                processed_count = count
                 buffer_to_proc = buffer[-min_frames_required:]
                 audio_samples = convert_to_audio(buffer_to_proc)
                 if audio_samples is not None:
                     yield audio_samples
+
+    if processed_count < count:
+        print("Dropped tokens: ", count = processed_count)
