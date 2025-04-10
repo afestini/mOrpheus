@@ -64,12 +64,15 @@ class LMStudioClient:
             "speed": self.speed
         })
 
+        self.chat_context = lms.Chat(self.system_prompt)
+
         self.stream = sd.OutputStream(samplerate = self.tts_sample_rate, channels = 1)
         self.stream.start()
 
 
     def chat(self, user_input: str):
-        for fragment in self.lms_chat.respond_stream(user_input):
+        self.chat_context.add_user_message(user_input)
+        for fragment in self.lms_chat.respond_stream(self.chat_context, on_message = self.chat_context.append):
             yield fragment.content
 
 
@@ -77,11 +80,8 @@ class LMStudioClient:
         # Clean the text for TTS
         cleaned_text = clean_text_for_tts(text)
         prompt = f"<|audio|>{self.default_voice}: {cleaned_text}<|eot_id|>"
-        def token_generator():
-            for fragment in self.lms_tts.complete_stream(prompt):
-                yield fragment.content
-
-        for samples in tokens_decoder(token_generator()):
+        response_stream = self.lms_tts.complete_stream(prompt)
+        for samples in tokens_decoder(response_stream):
             self.stream.write(samples)
 
 
