@@ -39,15 +39,8 @@ def convert_to_audio(multiframe, count):
     stream_ctx = torch.cuda.stream(cuda_stream) if cuda_stream is not None else torch.no_grad()
     with stream_ctx, torch.inference_mode():
         audio_hat = snac_model.decode(codes)
-        audio_slice = audio_hat[:, :, 2048:4096]
-        if snac_device == "cuda":
-            audio_int16_tensor = (audio_slice * 32767).to(torch.int16)
-            audio_bytes = audio_int16_tensor.cpu().numpy().tobytes()
-        else:
-            audio_np = audio_slice.detach().cpu().numpy()
-            audio_int16 = (audio_np * 32767).astype(np.int16)
-            audio_bytes = audio_int16.tobytes()
-    return audio_bytes
+        audio_slice = audio_hat[:, :, 2048:4096].cpu()
+    return audio_slice.squeeze().cpu().numpy().astype(np.float32)
 
 def turn_token_into_id(token_string, index):
     token_string = token_string.strip()

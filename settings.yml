@@ -23,8 +23,8 @@ lm:
 
   tts:
     endpoint: "/completions"            # API endpoint for text-to-speech synthesis.
-    model: "orpheus-3b-ft.gguf@q2_k"    # Model identifier for TTS synthesis.
-    default_voice: "tara"               # Default voice for TTS output.
+    model: "orpheus-3b-0.1-ft"    # Model identifier for TTS synthesis.
+    default_voice: "leah"               # Default voice for TTS output.
     max_tokens: 4096                    # Optimal for Orpheus.
     temperature: 0.6                    # Sampling temperature for TTS.
     top_p: 0.9                          # Top-p sampling value for TTS generation.
@@ -59,7 +59,7 @@ vad:
 # Hotword Detection Configuration
 # -------------------------------
 hotword:
-  enabled: true               # Whether hotword detection is enabled.
+  enabled: false               # Whether hotword detection is enabled.
   phrase: "Hey Cassie"        # Hotword phrase (case insensitive).
   sensitivity: 0.7            # Sensitivity (0-1); higher is more strict.
   timeout_sec: 5              # Time (in seconds) to listen for hotword before timeout.
@@ -84,5 +84,5 @@ speech:
 # Interaction Configuration
 # -------------------------------
 interaction:
-  mode: "both"              # Options: "push_to_talk", "hotword", or "both" to enable both simultaneously.
+  mode: "push_to_talk"              # Options: "push_to_talk", "hotword", or "both" to enable both simultaneously.
   post_audio_delay: 0.5     # Delay (in seconds) after audio playback before next activation.

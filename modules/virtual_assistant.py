@@ -25,6 +25,7 @@ class VirtualAssistant:
         # Always initialize hotword detector if enabled in config
         self.hotword_detector = HotwordDetector(config=self.config) if self.config["hotword"]["enabled"] else None
         self.performance = PerformanceMonitor()
+        self.word_limit = self.config["segmentation"]["max_words"]
         self._running = False
 
     def run(self):
@@ -42,20 +43,16 @@ class VirtualAssistant:
                         logger.warning("No speech detected.")
                         continue
                     # Get and process response
-                    response_text = self.lm_client.chat(user_text)
-                    self.performance.add_tokens(len(response_text.split()))
-                    
-                    # Synthesize speech
-                    word_count = len(response_text.split())
-                    if word_count > self.config["segmentation"]["max_words"]:
-                        logger.info("Response is long (%d words). Segmenting...", word_count)
-                        output_file = self.lm_client.synthesize_long_text(response_text)
-                    else:
-                        output_file = self.lm_client.synthesize_speech(response_text)
-                    
-                    # Play audio and wait for the activation signal before next loop
-                    self.play_audio(output_file)
-                    self._wait_for_activation()  # Wait again after audio playback
+                    response_text = ''
+                    for fragment in self.lm_client.chat(user_text):
+                        response_text += fragment
+                        print(fragment, end = '', flush = True)
+                        word_count = len(response_text.split())
+                        if word_count > self.word_limit:
+                            response_text = self.lm_client.synthesize_long_text(response_text)
+                    print()
+                    if response_text:
+                        self.lm_client.synthesize_speech(response_text)
                 except Exception as e:
                     logger.error("Error in main loop: %s", str(e))
                     time.sleep(1)
@@ -95,7 +92,7 @@ class VirtualAssistant:
         hotword_timeout = self.config["hotword"]["timeout_sec"] if self.hotword_detector else 0
         elapsed = 0.0
         check_interval = 0.5
-        while elapsed < hotword_timeout:
+        while not self.hotword_detector or elapsed < hotword_timeout:
             if self._check_for_keypress():
                 self._flush_stdin()
                 return True
