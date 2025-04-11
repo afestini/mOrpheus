@@ -34,6 +34,7 @@ class VirtualAssistant:
                     if not user_text:
                         logger.warning("No speech detected.")
                         continue
+                    print("Input: ", user_text)
                     # Get and process response
                     response_text = ''
                     for fragment in self.lm_client.chat(user_text):

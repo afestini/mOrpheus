@@ -2,6 +2,9 @@
 import lmstudio as lms
 import sounddevice as sd
 import re
+import numpy as np
+from time import sleep, time_ns
+from dvg_ringbuffer import RingBuffer
 from modules.audio import segment_text
 from modules.snac_decoder import tokens_decoder
 
@@ -21,6 +24,38 @@ def clean_text_for_tts(text: str) -> str:
     # Normalize whitespace
     text = re.sub(r'\s+', ' ', text)
     return text.strip()
+
+
+audio_buffer = RingBuffer(capacity=240000, dtype=np.float32)
+zero_buffer = np.zeros((24000,), dtype=np.float32)
+stream_paused = True
+last_data_time = 0
+
+def audio_callback(outdata, frames, time, status):
+    global audio_buffer
+    global stream_paused
+
+    if status:
+        print(status)
+
+    available = len(audio_buffer)
+    time_since_last_push = time_ns() - last_data_time
+    done_waiting = available and (available > 24000 or time_since_last_push > 0.15)
+
+    if stream_paused and not done_waiting:
+        outdata[:, 0] = zero_buffer[:frames]
+    elif available < frames:
+        #print("streaming ", frames, " available ", available)
+        outdata[:, 0] = np.concatenate((audio_buffer[:available], zero_buffer[:frames - available]))
+        audio_buffer.clear()
+        stream_paused = True
+    else:
+        stream_paused = False
+        #print("streaming ", frames, " available ", available)
+        outdata[:, 0] = audio_buffer[:frames]
+        for i in range(frames):
+            audio_buffer.popleft()
+
 
 class LMStudioClient:
     def __init__(self, config):
@@ -66,7 +101,9 @@ class LMStudioClient:
 
         self.chat_context = lms.Chat(self.system_prompt)
 
-        self.stream = sd.OutputStream(samplerate = self.tts_sample_rate, channels = 1)
+        self.stream = sd.OutputStream(samplerate = self.tts_sample_rate,
+                                      channels = 1,
+                                      callback = audio_callback)
         self.stream.start()
 
 
@@ -77,12 +114,16 @@ class LMStudioClient:
 
 
     def synthesize_speech(self, text: str) -> str:
+        global time_since_last_push
         # Clean the text for TTS
         cleaned_text = clean_text_for_tts(text)
         prompt = f"<|audio|>{self.default_voice}: {cleaned_text}<|eot_id|>"
         response_stream = self.lms_tts.complete_stream(prompt)
         for samples in tokens_decoder(response_stream):
-            self.stream.write(samples)
+            while len(audio_buffer) > self.tts_sample_rate * 5:
+                sleep(0.05)
+            audio_buffer.extend(samples)
+            time_since_last_push = time_ns()
 
 
     def synthesize_long_text(self, text: str) -> str:
