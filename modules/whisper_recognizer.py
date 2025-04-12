@@ -3,7 +3,6 @@ import time
 import torch
 import whisper
 from modules.logging import logger
-from modules.audio import record_until_silence
 from modules.config import load_config
 
 
@@ -17,16 +16,9 @@ class WhisperRecognizer:
         logger.info("Whisper model loaded on %s", device)
 
 
-    def transcribe(self) -> str:
+    def transcribe(self, audio) -> str:
         """Record and transcribe audio with error handling"""
         try:
-            audio = record_until_silence(
-                self.sample_rate,
-                device = self.config["audio"]["input_device"]
-            )
-            if audio.size == 0:
-                return ""
-
             logger.info("Transcribing...")
             start_time = time.time()
             result = self.model.transcribe(audio.flatten())

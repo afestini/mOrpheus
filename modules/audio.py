@@ -1,55 +1,102 @@
 # modules/audio.py
 import time
+import torch
 import numpy as np
 import sounddevice as sd
-import webrtcvad
+import collections
+import silero_vad as silero
 from dvg_ringbuffer import RingBuffer
 from modules.logging import logger
 
 # Default parameters (can be overridden via configuration)
-VAD_MODE = 2
-FRAME_DURATION_MS = 30
 SILENCE_THRESHOLD_MS = 1000
 MIN_RECORD_TIME_MS = 2000
 
 
-def record_until_silence(sample_rate, device=None):
-    global silence
-    """
-    Records audio until a period of silence is detected.
-    """
-    try:
-        vad_inst = webrtcvad.Vad(VAD_MODE)
-        frame_count = int(sample_rate * FRAME_DURATION_MS / 1000)
-        silence_frames = int(SILENCE_THRESHOLD_MS / FRAME_DURATION_MS)
-        recorded_frames = []
-        consecutive_silence = 0
-        start_time = time.time()
-        active_frames = 0
-        total_frames = 0
+class AudioStreamWatcher:
+    def __init__(self, sample_rate: int = 16000, device = None):
+        self.vad = silero.load_silero_vad()
+        self.sample_rate = sample_rate
+        self.frame_size = 512 if sample_rate == 16000 else 256
+        self.ms_per_frame = 1000 * self.frame_size // sample_rate
+        self.stream = sd.InputStream(samplerate=sample_rate, channels=1, device=device, blocksize=self.frame_size)
 
-        with sd.InputStream(samplerate=sample_rate, channels=1, device=device, blocksize=frame_count) as stream:
+
+    def check_for_keypress(self) -> bool:
+        """Non-blocking keypress check."""
+        pressed = False
+        try:
+            import msvcrt  # Windows
+            while msvcrt.kbhit():
+                pressed = True
+                msvcrt.getch()
+        except ImportError:
+            import sys
+            import select
+            import termios
+            if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
+                pressed = True
+                termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        return pressed
+
+
+    def listen_for_speech(self):
+        recorded_frames = collections.deque(maxlen = 2000 // self.ms_per_frame)
+
+        self.stream.start()
+
+        while True:
+            frame, _ = self.stream.read(self.frame_size)
+            recorded_frames.append(frame)
+
+            if self.check_for_keypress():
+                return np.empty(0)
+
+            tensor = torch.from_numpy(frame.flatten()).float()
+            if self.vad(tensor, self.sample_rate).item() > .7:
+                break
+
+        return self.record_until_silence(250 // self.ms_per_frame, 500, recorded_frames)
+
+
+    def record_until_silence(self,
+                             silence_frames = 0,
+                             min_record_time = MIN_RECORD_TIME_MS,
+                             existing_frames = []):
+        """
+        Records audio until a period of silence is detected.
+        """
+        try:
+            recorded_frames = []
+            recorded_frames.extend(existing_frames)
+            if silence_frames == 0:
+                silence_frames = SILENCE_THRESHOLD_MS / self.ms_per_frame
+
+            consecutive_silence = 0
+            start_time = time.time()
+            if not self.stream.active:
+                self.stream.start()
+
             while True:
-                frame, _ = stream.read(frame_count)
-                frame_int16 = (np.squeeze(frame) * 32767).astype(np.int16).tobytes()
-                is_speech = vad_inst.is_speech(frame_int16, sample_rate)
-                total_frames += 1
+                frame, _ = self.stream.read(self.frame_size)
+                recorded_frames.append(frame)
+
+                tensor = torch.from_numpy(frame.flatten()).float()
+                is_speech  = self.vad(tensor, self.sample_rate).item() > .7
                 if is_speech:
                     consecutive_silence = 0
-                    active_frames += 1
-                    recorded_frames.append(frame)
                 else:
                     consecutive_silence += 1
 
                 elapsed_ms = (time.time() - start_time) * 1000
-                if consecutive_silence >= silence_frames and elapsed_ms > MIN_RECORD_TIME_MS:
+                if consecutive_silence >= silence_frames and elapsed_ms > min_record_time:
                     break
 
-        percent_active = active_frames / total_frames
-        return np.concatenate(recorded_frames, axis=0) if percent_active > 0 else np.empty(0)
-    except Exception as e:
-        logger.error("Error during audio recording: %s", str(e))
-        raise
+            self.stream.stop()
+            return np.concatenate(recorded_frames, axis=0)
+        except Exception as e:
+            logger.error("Error during audio recording: %s", str(e))
+            raise
 
 
 def segment_text(text, max_words=60):

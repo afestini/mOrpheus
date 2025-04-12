@@ -44,14 +44,11 @@ tts:
 audio:
   input_device: null          # Specify input device ID, or leave null to use the system default.
   output_device: null         # Specify output device ID, or leave null to use the system default.
-  hotword_sample_rate: 16000  # Sample rate for hotword detection.
 
 # -------------------------------
 # Voice Activity Detection (VAD) Configuration
 # -------------------------------
 vad:
-  mode: 2                     # VAD aggressiveness (0 is least, 3 is most aggressive).
-  frame_duration_ms: 30       # Duration of each audio frame (in ms) for VAD analysis.
   silence_threshold_ms: 1000  # Duration (in ms) of consecutive silence to stop recording.
   min_record_time_ms: 2000    # Minimum recording duration (in ms).
 
@@ -59,30 +56,11 @@ vad:
 # Hotword Detection Configuration
 # -------------------------------
 hotword:
-  enabled: false               # Whether hotword detection is enabled.
-  phrase: "Hey Cassie"        # Hotword phrase (case insensitive).
-  sensitivity: 0.7            # Sensitivity (0-1); higher is more strict.
-  timeout_sec: 5              # Time (in seconds) to listen for hotword before timeout.
-  retries: 3                  # Maximum attempts to detect the hotword.
+  enabled: true               # Whether hotword detection is enabled.
+  phrase: "Listen up"         # Hotword phrase (case insensitive).
 
 # -------------------------------
 # Segmentation Configuration for TTS
 # -------------------------------
 segmentation:
   max_words: 60               # Maximum number of words per segment when splitting long TTS responses.
-
-# -------------------------------
-# Speech Quality Configuration
-# -------------------------------
-speech:
-  normalize_audio: false      # Whether to normalize audio volume.
-  default_pitch: 0            # Pitch adjustment (-20 to +20).
-  min_speech_confidence: 0.5  # Minimum confidence for accepting speech.
-  max_retries: 3              # Maximum retries for API calls.
-
-# -------------------------------
-# Interaction Configuration
-# -------------------------------
-interaction:
-  mode: "push_to_talk"              # Options: "push_to_talk", "hotword", or "both" to enable both simultaneously.
-  post_audio_delay: 0.5     # Delay (in seconds) after audio playback before next activation.
