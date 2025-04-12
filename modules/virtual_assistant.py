@@ -22,8 +22,6 @@ class VirtualAssistant:
 
     def run(self):
         self._running = True
-        logger.info("Assistant started. Press ENTER or say '%s' to interact.", self.config["hotword"]["phrase"])
-        
         try:
             while self._running:
                 try:
@@ -81,7 +79,7 @@ class VirtualAssistant:
         Wait for activation either by detecting a keypress (push-to-talk)
         or by detecting the hotword, whichever comes first.
         """
-        logger.info("Waiting for activation: press ENTER or say the hotword...")
+        logger.info("Press ENTER or say '%s' to interact.", self.config["hotword"]["phrase"])
         hotword_timeout = self.config["hotword"]["timeout_sec"] if self.hotword_detector else 0
         elapsed = 0.0
         check_interval = 0.5
@@ -93,8 +91,6 @@ class VirtualAssistant:
                 return True
             time.sleep(check_interval)
             elapsed += check_interval
-        # Fallback to blocking push-to-talk input if neither hotword nor keypress detected within the timeout
-        input("Press ENTER to speak...")
         return True
 
     def _check_for_keypress(self) -> bool:

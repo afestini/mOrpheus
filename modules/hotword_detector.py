@@ -14,14 +14,14 @@ class HotwordDetector:
     def __init__(self, config=None):
         self.config = config if config is not None else load_config()  # Use passed config if available
         hotword_config = self.config["hotword"]
-        audio_config = self.config["audio"]
+        whisper_config = self.config["whisper"]
 
         self.enabled = hotword_config["enabled"]
         self.phrase = hotword_config["phrase"].lower()
         self.sensitivity = hotword_config["sensitivity"]
         self.timeout = hotword_config["timeout_sec"]
         self.retries = hotword_config["retries"]
-        self.sample_rate = audio_config["hotword_sample_rate"]
+        self.sample_rate = whisper_config["sample_rate"]
 
         logger.info("Loading Whisper model for hotword detection...")
         self.whisper_model = whisper.load_model("tiny.en")
