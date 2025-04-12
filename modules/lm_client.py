@@ -41,7 +41,7 @@ class LMStudioClient:
         self.chat_temperature = chat_config["temperature"]
         self.chat_top_p = chat_config["top_p"]
         self.chat_repetition_penalty = chat_config["repetition_penalty"]
-        self.max_response_time = chat_config["max_response_time"]
+        self.chat_use_context = chat_config["use_context"]
 
         # TTS parameters
         tts_config = lm_config["tts"]
@@ -69,7 +69,8 @@ class LMStudioClient:
             "speed": self.speed
         })
 
-        self.chat_context = lms.Chat(self.system_prompt)
+        if self.chat_use_context:
+            self.chat_context = lms.Chat(self.system_prompt)
 
         self.stream = sd.OutputStream(samplerate = self.tts_sample_rate,
                                       channels = 1,
@@ -78,9 +79,13 @@ class LMStudioClient:
 
 
     def chat(self, user_input: str):
-        self.chat_context.add_user_message(user_input)
-        for fragment in self.lms_chat.respond_stream(self.chat_context, on_message = self.chat_context.append):
-            yield fragment.content
+        if self.chat_use_context:
+            self.chat_context.add_user_message(user_input)
+            for fragment in self.lms_chat.respond_stream(self.chat_context, on_message = self.chat_context.append):
+                yield fragment.content
+        else:
+            for fragment in self.lms_chat.respond_stream(user_input):
+                yield fragment.content
 
 
     def synthesize_speech(self, text: str) -> str:

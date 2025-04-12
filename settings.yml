@@ -19,7 +19,7 @@ lm:
     temperature: 0.7                    # Sampling temperature; controls randomness.
     top_p: 0.9                          # Top-p (nucleus sampling) value.
     repetition_penalty: 1.1             # Penalty factor to reduce repetitive outputs.
-    max_response_time: 10.0             # Increased timeout (in seconds) for slower responses.
+    use_context: true
 
   tts:
     endpoint: "/completions"            # API endpoint for text-to-speech synthesis.
