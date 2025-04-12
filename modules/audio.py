@@ -3,7 +3,6 @@ import time
 import numpy as np
 import sounddevice as sd
 import webrtcvad
-from scipy.io.wavfile import write as wav_write
 from modules.logging import logger
 
 # Default parameters (can be overridden via configuration)
@@ -11,7 +10,7 @@ VAD_MODE = 2
 FRAME_DURATION_MS = 30
 SILENCE_THRESHOLD_MS = 1000
 MIN_RECORD_TIME_MS = 2000
-DEFAULT_MAX_WORDS_PER_SEGMENT = 60
+
 
 def record_until_silence(sample_rate, device=None):
     """
@@ -47,7 +46,8 @@ def record_until_silence(sample_rate, device=None):
         logger.error("Error during audio recording: %s", str(e))
         raise
 
-def segment_text(text, max_words=DEFAULT_MAX_WORDS_PER_SEGMENT):
+
+def segment_text(text, max_words=60):
     """
     Splits text into segments of at most max_words, attempting to split at sentence boundaries.
     """
