@@ -23,6 +23,7 @@ class VirtualAssistant:
         self.word_limit = self.config["segmentation"]["max_words"]
         self.hotword_enabled = self.config["hotword"]["enabled"]
         self.hotword_phrase = self.config["hotword"]["phrase"]
+        self.hotword_ci = self.hotword_phrase.lower()
         self._running = False
 
 
@@ -87,11 +88,11 @@ class VirtualAssistant:
         if audio.size > 0:
             overheard = self.recognizer.transcribe(audio)
             print(f"Overheard: '{overheard}'")
-            idx = overheard.find(self.hotword_phrase)
+            idx = overheard.lower().find(self.hotword_ci)
             if idx < 0:
                 return False, ''
 
-            idx += len(self.hotword_phrase)
+            idx += len(self.hotword_ci)
             while idx < len(overheard) and not overheard[idx].isalnum():
                 idx += 1
             return True, overheard[idx:]
