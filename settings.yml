@@ -2,7 +2,7 @@
 # Configuration for Whisper STT
 # -------------------------------
 whisper:
-  model: "small.en"        # Name of the Whisper model to use for speech-to-text.
+  model: "distil-small.en" # Name of the Whisper model to use for speech-to-text.
   sample_rate: 16000       # Audio sample rate (in Hz) for recording and transcription.
 
 # -------------------------------

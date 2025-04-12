@@ -7,6 +7,7 @@ from modules.audio import audio_callback
 from modules.audio import push_samples
 from modules.snac_decoder import tokens_decoder
 
+
 def clean_text_for_tts(text: str) -> str:
     """
     Clean the text to be sent to the TTS engine by:

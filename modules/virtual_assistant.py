@@ -39,7 +39,7 @@ class VirtualAssistant:
                         prompt = False
 
                     if self.hotword_enabled:
-                        triggered, user_text = self._check_hotword()
+                        triggered, user_text = self._wait_for_hotword()
                     else:
                         triggered, _ = self.audio_watcher.check_for_keypress()
 
@@ -82,10 +82,11 @@ class VirtualAssistant:
         self._running = False
 
 
-    def _check_hotword(self) -> tuple[bool, str]:
+    def _wait_for_hotword(self) -> tuple[bool, str]:
         audio = self.audio_watcher.listen_for_speech()
         if audio.size > 0:
             overheard = self.recognizer.transcribe(audio)
+            print(f"Overheard: '{overheard}'")
             idx = overheard.find(self.hotword_phrase)
             if idx < 0:
                 return False, ''
@@ -95,4 +96,3 @@ class VirtualAssistant:
                 idx += 1
             return True, overheard[idx:]
         return True, ''
-
