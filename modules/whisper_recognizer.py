@@ -20,13 +20,11 @@ class WhisperRecognizer:
     def transcribe(self) -> str:
         """Record and transcribe audio with error handling"""
         try:
-            logger.info("Recording...")
             audio = record_until_silence(
                 self.sample_rate,
                 device = self.config["audio"]["input_device"]
             )
             if audio.size == 0:
-                logger.warning("No audio recorded")
                 return ""
 
             logger.info("Transcribing...")
@@ -35,8 +33,6 @@ class WhisperRecognizer:
             elapsed = time.time() - start_time
             logger.debug("Transcription took %.2f seconds", elapsed)
             text = result.get("text", "").strip()
-            if not text:
-                logger.warning("No speech detected in audio")
             return text
         except Exception as e:
             logger.error("Transcription failed: %s", str(e))

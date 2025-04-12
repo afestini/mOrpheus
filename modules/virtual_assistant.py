@@ -3,32 +3,46 @@ import time
 from modules.logging import logger
 from modules.whisper_recognizer import WhisperRecognizer
 from modules.lm_client import LMStudioClient
-from modules.hotword_detector import HotwordDetector
 from modules.config import load_config
+
 
 class VirtualAssistant:
     def __init__(self, config_path: str = "settings.yml"):
         self.config = load_config(config_path)
         self.recognizer = WhisperRecognizer(
-            model_name=self.config["whisper"]["model"],
-            sample_rate=self.config["whisper"]["sample_rate"],
-            config=self.config
+            model_name = self.config["whisper"]["model"],
+            sample_rate = self.config["whisper"]["sample_rate"],
+            config = self.config
         )
         self.lm_client = LMStudioClient(self.config)
-        # Always initialize hotword detector if enabled in config
-        self.hotword_detector = HotwordDetector(config=self.config) if self.config["hotword"]["enabled"] else None
         self.word_limit = self.config["segmentation"]["max_words"]
+        self.hotword_enabled = self.config["hotword"]["enabled"]
+        self.hotword_phrase = self.config["hotword"]["phrase"]
         self._running = False
+
 
     def run(self):
         self._running = True
         try:
             while self._running:
                 try:
-                    if not self._wait_for_activation():
+                    user_text = ''
+                    triggered = False
+                    if self.hotword_enabled:
+                        overheard = self.recognizer.transcribe()
+                        idx = overheard.find(self.hotword_phrase)
+                        if idx >= 0:
+                            idx += len(self.hotword_phrase)
+                            triggered = True
+                            while idx < len(overheard) and not overheard[idx].isalnum():
+                                idx += 1
+                            user_text = overheard[idx:]
+
+                    if not triggered and not self._check_for_keypress():
                         continue
-                    # Record and process user input
-                    user_text = self.recognizer.transcribe()
+
+                    logger.info("Listening...")
+                    user_text += self.recognizer.transcribe()
                     if not user_text:
                         logger.warning("No speech detected.")
                         continue
@@ -57,8 +71,10 @@ class VirtualAssistant:
                 logger.error("Error in performance report: %s", str(e))
             self._running = False
 
+
     def stop(self):
         self._running = False
+
 
     def _flush_stdin(self):
         """Flush any lingering input from stdin."""
@@ -74,6 +90,7 @@ class VirtualAssistant:
             except Exception:
                 pass
 
+
     def _wait_for_activation(self) -> bool:
         """
         Wait for activation either by detecting a keypress (push-to-talk)
@@ -81,17 +98,13 @@ class VirtualAssistant:
         """
         logger.info("Press ENTER or say '%s' to interact.", self.config["hotword"]["phrase"])
         hotword_timeout = self.config["hotword"]["timeout_sec"] if self.hotword_detector else 0
-        elapsed = 0.0
-        check_interval = 0.5
-        while not self.hotword_detector or elapsed < hotword_timeout:
-            if self._check_for_keypress():
-                self._flush_stdin()
-                return True
-            if self.hotword_detector and self.hotword_detector.check_for_hotword(timeout=check_interval):
-                return True
-            time.sleep(check_interval)
-            elapsed += check_interval
-        return True
+        if self._check_for_keypress():
+            self._flush_stdin()
+            return True
+        if self.hotword_detector and self.hotword_detector.check_for_hotword(timeout = hotword_timeout):
+            return True
+        return False
+
 
     def _check_for_keypress(self) -> bool:
         """Non-blocking keypress check."""

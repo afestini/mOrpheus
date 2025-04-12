@@ -2,10 +2,9 @@
 import lmstudio as lms
 import sounddevice as sd
 import re
-import numpy as np
-from time import sleep, time_ns
-from dvg_ringbuffer import RingBuffer
 from modules.audio import segment_text
+from modules.audio import audio_callback
+from modules.audio import push_samples
 from modules.snac_decoder import tokens_decoder
 
 def clean_text_for_tts(text: str) -> str:
@@ -23,38 +22,9 @@ def clean_text_for_tts(text: str) -> str:
     text = re.sub(r'[^\x00-\x7F]+', '', text)
     # Normalize whitespace
     text = re.sub(r'\s+', ' ', text)
+    # Remove special tags
+    text = re.sub(r'<[/]*i_[\d]+>', '', text)
     return text.strip()
-
-
-audio_buffer = RingBuffer(capacity=240000, dtype=np.float32)
-zero_buffer = np.zeros((24000,), dtype=np.float32)
-stream_paused = True
-last_data_time = 0
-
-def audio_callback(outdata, frames, time, status):
-    global audio_buffer
-    global stream_paused
-
-    if status:
-        print(status)
-
-    available = len(audio_buffer)
-    time_since_last_push = time_ns() - last_data_time
-    done_waiting = available and (available > 24000 or time_since_last_push > 0.15)
-
-    if stream_paused and not done_waiting:
-        outdata[:, 0] = zero_buffer[:frames]
-    elif available < frames:
-        #print("streaming ", frames, " available ", available)
-        outdata[:, 0] = np.concatenate((audio_buffer[:available], zero_buffer[:frames - available]))
-        audio_buffer.clear()
-        stream_paused = True
-    else:
-        stream_paused = False
-        #print("streaming ", frames, " available ", available)
-        outdata[:, 0] = audio_buffer[:frames]
-        for i in range(frames):
-            audio_buffer.popleft()
 
 
 class LMStudioClient:
@@ -119,10 +89,7 @@ class LMStudioClient:
         prompt = f"<|audio|>{self.default_voice}: {cleaned_text}<|eot_id|>"
         response_stream = self.lms_tts.complete_stream(prompt)
         for samples in tokens_decoder(response_stream):
-            while len(audio_buffer) > self.tts_sample_rate * 5:
-                sleep(0.05)
-            audio_buffer.extend(samples)
-            time_since_last_push = time_ns()
+            push_samples(samples, sample_rate = self.tts_sample_rate)
 
 
     def synthesize_long_text(self, text: str) -> str:
