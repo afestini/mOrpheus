@@ -118,6 +118,7 @@ def segment_text(text, max_words=60):
     return segments
 
 
+# TTS stream functions
 audio_buffer = RingBuffer(capacity=240000, dtype=np.float32)
 zero_buffer = np.zeros((24000,), dtype=np.float32)
 stream_paused = True
@@ -137,13 +138,11 @@ def audio_callback(outdata, frames, _, status):
     if stream_paused and not done_waiting:
         outdata[:, 0] = zero_buffer[:frames]
     elif available < frames:
-        #print("streaming ", frames, " available ", available)
         outdata[:, 0] = np.concatenate((audio_buffer[:available], zero_buffer[:frames - available]))
         audio_buffer.clear()
         stream_paused = True
     else:
         stream_paused = False
-        #print("streaming ", frames, " available ", available)
         outdata[:, 0] = audio_buffer[:frames]
         for i in range(frames):
             audio_buffer.popleft()

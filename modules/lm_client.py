@@ -72,10 +72,10 @@ class LMStudioClient:
         if self.chat_use_context:
             self.chat_context = lms.Chat(self.system_prompt)
 
-        self.stream = sd.OutputStream(samplerate = self.tts_sample_rate,
-                                      channels = 1,
-                                      callback = audio_callback)
-        self.stream.start()
+        self.tts_stream = sd.OutputStream(samplerate = self.tts_sample_rate,
+                                          channels = 1,
+                                          callback = audio_callback)
+        self.tts_stream.start()
 
 
     def chat(self, user_input: str):
