@@ -52,7 +52,6 @@ class LMStudioClient:
         self.tts_top_p = tts_config["top_p"]
         self.tts_repetition_penalty = tts_config["repetition_penalty"]
         self.speed = tts_config["speed"]
-        self.max_segment_duration = tts_config["max_segment_duration"]
         self.tts_sample_rate = config["tts"]["sample_rate"]
 
         self.lms_chat = lms.llm(self.chat_model, config = {

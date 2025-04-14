@@ -19,18 +19,17 @@ lm:
     temperature: 0.7                    # Sampling temperature; controls randomness.
     top_p: 0.9                          # Top-p (nucleus sampling) value.
     repetition_penalty: 1.1             # Penalty factor to reduce repetitive outputs.
-    use_context: true
+    use_context: true                   # Ongoing conversation vs. one shot commands
 
   tts:
     endpoint: "/completions"            # API endpoint for text-to-speech synthesis.
     model: "orpheus-3b-0.1-ft"    # Model identifier for TTS synthesis.
-    default_voice: "leah"               # Default voice for TTS output.
+    default_voice: "tara"               # Default voice for TTS output.
     max_tokens: 4096                    # Optimal for Orpheus.
     temperature: 0.6                    # Sampling temperature for TTS.
     top_p: 0.9                          # Top-p sampling value for TTS generation.
     repetition_penalty: 1.0             # Penalty to prevent repetitive TTS output.
     speed: 1.0                          # More natural speed.
-    max_segment_duration: 20            # Increased maximum seconds per TTS segment.
 
 # -------------------------------
 # TTS Audio Output Configuration
@@ -50,17 +49,18 @@ audio:
 # -------------------------------
 vad:
   silence_threshold_ms: 1000  # Duration (in ms) of consecutive silence to stop recording.
-  min_record_time_ms: 2000    # Minimum recording duration (in ms).
+  voice_confidence_threshold: 0.7    # Minimum confidence for active speech.
+  silence_confidence_threshold: 0.5    # Maximum confidence for silence.
 
 # -------------------------------
-# Hotword Detection Configuration
+# Wake Word Detection Configuration
 # -------------------------------
-hotword:
-  enabled: true               # Whether hotword detection is enabled.
-  phrase: "Listen up"         # Hotword phrase (case insensitive).
+wakeword:
+  enabled: true               # Whether wake word detection is enabled.
+  phrase: "Listen up"         # Wake word phrase (case insensitive).
 
 # -------------------------------
 # Segmentation Configuration for TTS
 # -------------------------------
 segmentation:
-  max_words: 60               # Maximum number of words per segment when splitting long TTS responses.
+  max_words: 100               # Maximum number of words per segment when splitting long TTS responses.

@@ -1,7 +1,6 @@
 # modules/audio.py
 import time
 import queue
-import threading
 import numpy as np
 import sounddevice as sd
 from modules.vad import VAD, VADState
@@ -18,9 +17,14 @@ class State(Enum):
 
 
 class AudioStreamWatcher:
-    def __init__(self, sample_rate: int = 16000, device = None):
+    def __init__(self, config):
+        sample_rate = config["whisper"]["sample_rate"]
+        device = config["audio"]["input_device"]
+
         frame_size = 512 if sample_rate == 16000 else 256
         ms_per_frame = 1000 * frame_size // sample_rate
+
+        self.wake_word_lc = config["wakeword"]["phrase"].lower()
 
         self.recognizer = WhisperRecognizer()
 
@@ -31,16 +35,27 @@ class AudioStreamWatcher:
                 blocksize = frame_size,
                 callback = self.mic_callback)
 
-        self.vad = VAD(sample_rate = sample_rate, silence_threshold_ms = 1000)
+        voice_threshold = config["vad"]["voice_confidence_threshold"]
+        silence_threshold = config["vad"]["silence_confidence_threshold"]
+        self.vad = VAD(sample_rate = sample_rate,
+                       voice_threshold = voice_threshold,
+                       silence_threshold = silence_threshold)
 
+        self.recorded_frames = []
         self.recent_frames = np.zeros(sample_rate * 3, dtype=np.float32)
         self.recent_idx = 0
 
+        self.state = State.WAIT_FOR_VAD
+        self.next_wake_word_check_time = 0
         self.frame_queue = queue.Queue(maxsize= 1000 // ms_per_frame)
-        self.proc_thread = threading.Thread(target = self.processing_func)
-        self.stop_event = threading.Event()
+
+
+    def start(self):
         self.mic_stream.start()
-        self.proc_thread.run()
+
+
+    def stop(self):
+        self.mic_stream.stop()
 
 
     def mic_callback(self, indata, frames, timestamp, status):
@@ -64,54 +79,58 @@ class AudioStreamWatcher:
 
 
     def processing_func(self):
-        state = State.WAIT_FOR_VAD
-        next_wake_word_check_time = 0
+        chunk = None
+        try:
+            chunk = self.frame_queue.get(timeout = 0.1)
+        except queue.Empty:
+            return ''
 
-        while not self.stop_event.is_set():
-            chunk = None
-            try:
-                chunk = self.frame_queue.get(timeout = 0.1)
-            except queue.Empty:
-                continue
+        silence_threshold = 1500 if self.state == State.RECORDING else 1000
+        vad_state = self.vad.update_state(chunk, silence_threshold)
 
-            vad_state = self.vad.update_state(chunk)
-
-            if state == State.RECORDING:
-                if vad_state == VADState.SILENCE:
-                    print("Transcribing...")
-                    print("Waiting for voice activation")
-                    state = State.WAIT_FOR_VAD
-                continue
-
-            if check_for_keypress():
-                state = State.RECORDING
-                print("Listening...")
-                self.vad.set_active()
+        if self.state == State.RECORDING:
+            if vad_state == VADState.SILENCE:
+                print("Transcribing...")
+                audio = np.concatenate(self.recorded_frames).flatten()
+                print("Waiting for voice activation")
+                self.state = State.WAIT_FOR_VAD
+                return self.recognizer.transcribe(audio)
             else:
-               self.update_recent_frames(chunk)
+                self.recorded_frames.append(chunk)
+            return ''
 
-            if state == State.WAIT_FOR_VAD:
-                if vad_state == VADState.ATTACK:
-                    state = State.LISTEN_FOR_WAKE_WORD
-                    next_wake_word_check_time = time.time() + .2
-                    print("Listening for wake word")
+        if check_for_keypress():
+            self.vad.set_active()
+            self.recorded_frames.clear()
+            print("Listening...")
+            self.state = State.RECORDING
 
-            if state == State.LISTEN_FOR_WAKE_WORD:
-                if time.time() >= next_wake_word_check_time:
-                    next_wake_word_check_time = time.time() + .2
-                    audio = np.roll(self.recent_frames, -self.recent_idx % len(self.recent_frames))
-                    if self.check_for_wake_word(audio):
-                        state = State.RECORDING
-                        print("Listening...")
-                elif vad_state == VADState.SILENCE:
-                    print("Waiting for voice activation")
-                    state = State.WAIT_FOR_VAD
+        if self.state == State.WAIT_FOR_VAD:
+            self.update_recent_frames(chunk)
+            if vad_state == VADState.ATTACK:
+                self.next_wake_word_check_time = time.time() + .2
+                print("Listening for wake word")
+                self.state = State.LISTEN_FOR_WAKE_WORD
+
+        if self.state == State.LISTEN_FOR_WAKE_WORD:
+            self.update_recent_frames(chunk)
+            if time.time() >= self.next_wake_word_check_time:
+                self.next_wake_word_check_time = time.time() + .2
+                audio = np.roll(self.recent_frames, -self.recent_idx % len(self.recent_frames))
+                if self.check_for_wake_word(audio):
+                    print("Listening...")
+                    self.recorded_frames = [audio]
+                    self.state = State.RECORDING
+            elif vad_state == VADState.SILENCE:
+                print("Waiting for voice activation")
+                self.state = State.WAIT_FOR_VAD
+        return ''
 
 
     def check_for_wake_word(self, audio) -> bool:
         overheard = self.recognizer.transcribe(audio)
         print(f"Overheard: '{overheard}'")
-        idx = overheard.lower().find("listen up")
+        idx = overheard.lower().find(self.wake_word_lc)
         return idx >= 0
 
 
