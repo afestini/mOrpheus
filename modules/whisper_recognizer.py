@@ -7,8 +7,10 @@ from modules.config import load_config
 
 
 class WhisperRecognizer:
-    def __init__(self, model_name: str = "base", sample_rate: int = 16000, config=None):
+    def __init__(self, config = None):
         self.config = config if config is not None else load_config()
+        model_name = self.config["whisper"]["model"]
+        sample_rate = self.config["whisper"]["sample_rate"]
         logger.info("Loading Whisper model (%s)...", model_name)
         device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model = WhisperModel(model_name, device = device)
@@ -22,7 +24,7 @@ class WhisperRecognizer:
             logger.info("Transcribing...")
             start_time = time.time()
             text = ''
-            segments, _ = self.model.transcribe(audio.flatten(), vad_filter = True)
+            segments, _ = self.model.transcribe(audio, vad_filter = True)
             for segment in segments:
                 text += segment.text
             elapsed = time.time() - start_time

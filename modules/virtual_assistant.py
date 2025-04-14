@@ -10,11 +10,7 @@ from modules.config import load_config
 class VirtualAssistant:
     def __init__(self, config_path: str = "settings.yml"):
         self.config = load_config(config_path)
-        self.recognizer = WhisperRecognizer(
-            model_name = self.config["whisper"]["model"],
-            sample_rate = self.config["whisper"]["sample_rate"],
-            config = self.config
-        )
+        self.recognizer = WhisperRecognizer(config = self.config)
         self.audio_watcher = AudioStreamWatcher(
             sample_rate = self.config["whisper"]["sample_rate"],
             device = self.config["audio"]["input_device"]

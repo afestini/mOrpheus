@@ -1,102 +1,118 @@
 # modules/audio.py
 import time
-import torch
+import queue
+import threading
 import numpy as np
 import sounddevice as sd
-import collections
-import silero_vad as silero
+from modules.vad import VAD, VADState
+from modules.keypress import check_for_keypress
+from modules.whisper_recognizer import WhisperRecognizer
 from dvg_ringbuffer import RingBuffer
-from modules.logging import logger
+from enum import Enum
 
-# Default parameters (can be overridden via configuration)
-SILENCE_THRESHOLD_MS = 1000
-MIN_RECORD_TIME_MS = 2000
+
+class State(Enum):
+    WAIT_FOR_VAD = 0,
+    LISTEN_FOR_WAKE_WORD = 1,
+    RECORDING = 2
 
 
 class AudioStreamWatcher:
     def __init__(self, sample_rate: int = 16000, device = None):
-        self.vad = silero.load_silero_vad()
-        self.sample_rate = sample_rate
-        self.frame_size = 512 if sample_rate == 16000 else 256
-        self.ms_per_frame = 1000 * self.frame_size // sample_rate
-        self.stream = sd.InputStream(samplerate=sample_rate, channels=1, device=device, blocksize=self.frame_size)
+        frame_size = 512 if sample_rate == 16000 else 256
+        ms_per_frame = 1000 * frame_size // sample_rate
+
+        self.recognizer = WhisperRecognizer()
+
+        self.mic_stream = sd.InputStream(
+                samplerate = sample_rate,
+                channels = 1,
+                device = device,
+                blocksize = frame_size,
+                callback = self.mic_callback)
+
+        self.vad = VAD(sample_rate = sample_rate, silence_threshold_ms = 1000)
+
+        self.recent_frames = np.zeros(sample_rate * 3, dtype=np.float32)
+        self.recent_idx = 0
+
+        self.frame_queue = queue.Queue(maxsize= 1000 // ms_per_frame)
+        self.proc_thread = threading.Thread(target = self.processing_func)
+        self.stop_event = threading.Event()
+        self.mic_stream.start()
+        self.proc_thread.run()
 
 
-    def check_for_keypress(self) -> bool:
-        """Non-blocking keypress check."""
-        pressed = False
+    def mic_callback(self, indata, frames, timestamp, status):
         try:
-            import msvcrt  # Windows
-            while msvcrt.kbhit():
-                pressed = True
-                msvcrt.getch()
-        except ImportError:
-            import sys
-            import select
-            import termios
-            if sys.stdin in select.select([sys.stdin], [], [], 0)[0]:
-                pressed = True
-                termios.tcflush(sys.stdin, termios.TCIFLUSH)
-        return pressed
+            chunk = indata[:, 0].copy()
+            self.frame_queue.put_nowait(chunk)
+        except queue.Full:
+            pass
 
 
-    def listen_for_speech(self):
-        recorded_frames = collections.deque(maxlen = 2000 // self.ms_per_frame)
-
-        self.stream.start()
-
-        while True:
-            frame, _ = self.stream.read(self.frame_size)
-            recorded_frames.append(frame)
-
-            if self.check_for_keypress():
-                return np.empty(0)
-
-            tensor = torch.from_numpy(frame.flatten()).float()
-            if self.vad(tensor, self.sample_rate).item() > .7:
-                break
-
-        return self.record_until_silence(250 // self.ms_per_frame, 500, recorded_frames)
+    def update_recent_frames(self, chunk):
+        n = len(chunk)
+        idx = self.recent_idx % len(self.recent_frames)
+        if idx + n < len(self.recent_frames):
+            self.recent_frames[idx:idx + n] = chunk
+        else:
+            part1 = len(self.recent_frames) - idx
+            self.recent_frames[idx:] = chunk[:part1]
+            self.recent_frames[:n - part1] = chunk[part1:]
+        self.recent_idx += n
 
 
-    def record_until_silence(self,
-                             silence_frames = 0,
-                             min_record_time = MIN_RECORD_TIME_MS,
-                             existing_frames = []):
-        """
-        Records audio until a period of silence is detected.
-        """
-        try:
-            recorded_frames = []
-            recorded_frames.extend(existing_frames)
-            if silence_frames == 0:
-                silence_frames = SILENCE_THRESHOLD_MS / self.ms_per_frame
+    def processing_func(self):
+        state = State.WAIT_FOR_VAD
+        next_wake_word_check_time = 0
 
-            consecutive_silence = 0
-            start_time = time.time()
-            if not self.stream.active:
-                self.stream.start()
+        while not self.stop_event.is_set():
+            chunk = None
+            try:
+                chunk = self.frame_queue.get(timeout = 0.1)
+            except queue.Empty:
+                continue
 
-            while True:
-                frame, _ = self.stream.read(self.frame_size)
-                recorded_frames.append(frame)
+            vad_state = self.vad.update_state(chunk)
 
-                tensor = torch.from_numpy(frame.flatten()).float()
-                is_speech  = self.vad(tensor, self.sample_rate).item() > .7
-                if is_speech:
-                    consecutive_silence = 0
-                else:
-                    consecutive_silence += 1
+            if state == State.RECORDING:
+                if vad_state == VADState.SILENCE:
+                    print("Transcribing...")
+                    print("Waiting for voice activation")
+                    state = State.WAIT_FOR_VAD
+                continue
 
-                elapsed_ms = (time.time() - start_time) * 1000
-                if consecutive_silence >= silence_frames and elapsed_ms > min_record_time:
-                    break
+            if check_for_keypress():
+                state = State.RECORDING
+                print("Listening...")
+                self.vad.set_active()
+            else:
+               self.update_recent_frames(chunk)
 
-            self.stream.stop()
-            return np.concatenate(recorded_frames, axis=0)
-        except Exception as e:
-            logger.error("Error during audio recording: %s", str(e))
-            raise
+            if state == State.WAIT_FOR_VAD:
+                if vad_state == VADState.ATTACK:
+                    state = State.LISTEN_FOR_WAKE_WORD
+                    next_wake_word_check_time = time.time() + .2
+                    print("Listening for wake word")
+
+            if state == State.LISTEN_FOR_WAKE_WORD:
+                if time.time() >= next_wake_word_check_time:
+                    next_wake_word_check_time = time.time() + .2
+                    audio = np.roll(self.recent_frames, -self.recent_idx % len(self.recent_frames))
+                    if self.check_for_wake_word(audio):
+                        state = State.RECORDING
+                        print("Listening...")
+                elif vad_state == VADState.SILENCE:
+                    print("Waiting for voice activation")
+                    state = State.WAIT_FOR_VAD
+
+
+    def check_for_wake_word(self, audio) -> bool:
+        overheard = self.recognizer.transcribe(audio)
+        print(f"Overheard: '{overheard}'")
+        idx = overheard.lower().find("listen up")
+        return idx >= 0
 
 
 def segment_text(text, max_words=60):

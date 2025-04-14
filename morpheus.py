@@ -4,6 +4,7 @@ import sys
 from modules.virtual_assistant import VirtualAssistant
 from modules.logging import logger
 
+
 def main():
     parser = argparse.ArgumentParser(description="Start the mOrpheus Virtual Assistant.")
     parser.add_argument(
