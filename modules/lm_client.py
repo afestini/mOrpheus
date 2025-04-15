@@ -2,10 +2,10 @@
 import lmstudio as lms
 import sounddevice as sd
 import re
-from modules.audio import segment_text
-from modules.audio import audio_callback
-from modules.audio import push_samples
+import threading
+from queue import Queue
 from modules.snac_decoder import tokens_decoder
+from modules.audio import TTS
 
 
 def clean_text_for_tts(text: str) -> str:
@@ -68,13 +68,19 @@ class LMStudioClient:
             "speed": self.speed
         })
 
+        self.tts = TTS(config["tts"])
+
         if self.chat_use_context:
             self.chat_context = lms.Chat(self.system_prompt)
 
         self.tts_stream = sd.OutputStream(samplerate = self.tts_sample_rate,
                                           channels = 1,
-                                          callback = audio_callback)
+                                          callback = self.tts.audio_callback)
         self.tts_stream.start()
+
+        self.tts_thread = threading.Thread(target = self.tts_thread_func)
+        self.tts_thread.start()
+        self.tts_queue = Queue(100)
 
 
     def chat(self, user_input: str):
@@ -87,21 +93,52 @@ class LMStudioClient:
                 yield fragment.content
 
 
+    def tts_thread_func(self):
+        while self.tts_queue:
+            text = None
+            try:
+                text = self.tts_queue.get()
+            except Exception:
+                continue
+
+            prompt = f"<|audio|>{self.default_voice}: {text}<|eot_id|>"
+            response_stream = self.lms_tts.complete_stream(prompt)
+            for samples in tokens_decoder(response_stream):
+                self.tts.push_samples(samples)
+
+
     def synthesize_speech(self, text: str) -> str:
         global time_since_last_push
-        # Clean the text for TTS
-        cleaned_text = clean_text_for_tts(text)
-        prompt = f"<|audio|>{self.default_voice}: {cleaned_text}<|eot_id|>"
-        response_stream = self.lms_tts.complete_stream(prompt)
-        for samples in tokens_decoder(response_stream):
-            push_samples(samples, sample_rate = self.tts_sample_rate)
+        self.tts_queue.put(item = clean_text_for_tts(text))
 
 
     def synthesize_long_text(self, text: str) -> str:
-        word_limit = self.config["segmentation"]["max_words"]
+        word_limit = self.config["tts"]["max_words"]
         segments = segment_text(text, max_words = word_limit)
         for i, seg in enumerate(segments):
             if i + 1 == len(segments) and len(seg) < word_limit * 3:
                 return seg
             self.synthesize_speech(seg)
         return ''
+
+
+def segment_text(text, max_words=60):
+    """
+    Splits text into segments of at most max_words, attempting to split at sentence boundaries.
+    """
+    words = text.split()
+    segments = []
+    while len(words) > max_words:
+        segment = " ".join(words[:max_words])
+        cutoff = max_words
+        for i, word in enumerate(segment.split()):
+            if word.endswith(("\n")):
+                cutoff = i + 1
+                break # Always split on paragraphs
+            elif word.endswith((".", "!", "?")):
+                cutoff = i + 1
+        segments.append(" ".join(words[:cutoff]).strip())
+        words = words[cutoff:]
+    if words:
+        segments.append(" ".join(words).strip())
+    return segments

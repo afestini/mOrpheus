@@ -21,14 +21,14 @@ class WhisperRecognizer:
     def transcribe(self, audio) -> str:
         """Record and transcribe audio with error handling"""
         try:
-            logger.info("Transcribing...")
+          #  logger.info("Transcribing...")
             start_time = time.time()
             text = ''
-            segments, _ = self.model.transcribe(audio, vad_filter = True)
+            segments, _ = self.model.transcribe(audio)
             for segment in segments:
                 text += segment.text
             elapsed = time.time() - start_time
-            logger.debug("Transcription took %.2f seconds", elapsed)
+          #  logger.debug("Transcription took %.2f seconds", elapsed)
             return text
         except Exception as e:
             logger.error("Transcription failed: %s", str(e))

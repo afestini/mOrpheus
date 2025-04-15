@@ -1,5 +1,4 @@
 # modules/virtual_assistant.py
-import time
 from modules.logging import logger
 from modules.whisper_recognizer import WhisperRecognizer
 from modules.lm_client import LMStudioClient
@@ -13,7 +12,7 @@ class VirtualAssistant:
         self.recognizer = WhisperRecognizer(config = self.config)
         self.audio_watcher = AudioStreamWatcher(config = self.config)
         self.lm_client = LMStudioClient(self.config)
-        self.word_limit = self.config["segmentation"]["max_words"]
+        self.word_limit = self.config["tts"]["max_words"]
         self.wakeword_enabled = self.config["wakeword"]["enabled"]
         self.wakeword_phrase = self.config["wakeword"]["phrase"]
         self.wakeword_ci = self.wakeword_phrase.lower()
@@ -23,8 +22,8 @@ class VirtualAssistant:
     def run(self):
         self._running = True
         prompt = True
+        self.audio_watcher.start()
         try:
-            self.audio_watcher.start()
             while self._running:
                 try:
                     if prompt:
@@ -36,6 +35,7 @@ class VirtualAssistant:
                         continue
 
                     print("Input: ", user_text)
+
                     # Get and process response
                     response_text = ''
                     for fragment in self.lm_client.chat(user_text):
@@ -45,6 +45,7 @@ class VirtualAssistant:
                         if word_count > self.word_limit:
                             response_text = self.lm_client.synthesize_long_text(response_text)
                     print()
+
                     if response_text:
                         self.lm_client.synthesize_speech(response_text)
                     prompt = True
@@ -59,19 +60,3 @@ class VirtualAssistant:
 
     def stop(self):
         self._running = False
-
-
-    def _wait_for_wakeword(self) -> tuple[bool, str]:
-        audio = self.audio_watcher.listen_for_speech()
-        if audio.size > 0:
-            overheard = self.recognizer.transcribe(audio)
-            print(f"Overheard: '{overheard}'")
-            idx = overheard.lower().find(self.wakeword_ci)
-            if idx < 0:
-                return False, ''
-
-            idx += len(self.wakeword_ci)
-            while idx < len(overheard) and not overheard[idx].isalnum():
-                idx += 1
-            return True, overheard[idx:]
-        return True, ''

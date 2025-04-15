@@ -36,6 +36,9 @@ lm:
 # -------------------------------
 tts:
   sample_rate: 24000          # Sample rate (in Hz) for the generated TTS audio.
+  buffer_duration_ms: 1000     # Samples to collect before starting playback
+  start_delay_ms: 500         # Delay after last generated sample before starting playback
+  max_words: 80               # Maximum number of words per segment when splitting long TTS responses.
 
 # -------------------------------
 # Audio Device Configuration
@@ -48,19 +51,14 @@ audio:
 # Voice Activity Detection (VAD) Configuration
 # -------------------------------
 vad:
-  silence_threshold_ms: 1000  # Duration (in ms) of consecutive silence to stop recording.
+  silence_threshold_ms: 1500  # Duration (in ms) of consecutive silence to stop recording.
+  silence_threshold_wake_word_ms: 1000  # Duration (in ms) of consecutive silence to stop recording.
   voice_confidence_threshold: 0.7    # Minimum confidence for active speech.
-  silence_confidence_threshold: 0.5    # Maximum confidence for silence.
+  silence_confidence_threshold: 0.3    # Maximum confidence for silence.
 
 # -------------------------------
 # Wake Word Detection Configuration
 # -------------------------------
 wakeword:
   enabled: true               # Whether wake word detection is enabled.
-  phrase: "Listen up"         # Wake word phrase (case insensitive).
-
-# -------------------------------
-# Segmentation Configuration for TTS
-# -------------------------------
-segmentation:
-  max_words: 100               # Maximum number of words per segment when splitting long TTS responses.
+  phrase: "Bitch"         # Wake word phrase (case insensitive).

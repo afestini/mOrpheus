@@ -25,6 +25,7 @@ class AudioStreamWatcher:
         ms_per_frame = 1000 * frame_size // sample_rate
 
         self.wake_word_lc = config["wakeword"]["phrase"].lower()
+        self.next_wake_word_check_time = 0
 
         self.recognizer = WhisperRecognizer()
 
@@ -37,6 +38,8 @@ class AudioStreamWatcher:
 
         voice_threshold = config["vad"]["voice_confidence_threshold"]
         silence_threshold = config["vad"]["silence_confidence_threshold"]
+        self.silence_threshold_ms = config["vad"]["silence_threshold_ms"]
+        self.silence_threshold_wake_word_ms = config["vad"]["silence_threshold_wake_word_ms"]
         self.vad = VAD(sample_rate = sample_rate,
                        voice_threshold = voice_threshold,
                        silence_threshold = silence_threshold)
@@ -46,8 +49,7 @@ class AudioStreamWatcher:
         self.recent_idx = 0
 
         self.state = State.WAIT_FOR_VAD
-        self.next_wake_word_check_time = 0
-        self.frame_queue = queue.Queue(maxsize= 1000 // ms_per_frame)
+        self.frame_queue = queue.Queue(maxsize = 1000 // ms_per_frame)
 
 
     def start(self):
@@ -85,16 +87,22 @@ class AudioStreamWatcher:
         except queue.Empty:
             return ''
 
-        silence_threshold = 1500 if self.state == State.RECORDING else 1000
+        silence_threshold = self.silence_threshold_ms if self.state == State.RECORDING else self.silence_threshold_wake_word_ms
         vad_state = self.vad.update_state(chunk, silence_threshold)
 
         if self.state == State.RECORDING:
             if vad_state == VADState.SILENCE:
                 print("Transcribing...")
                 audio = np.concatenate(self.recorded_frames).flatten()
-                print("Waiting for voice activation")
                 self.state = State.WAIT_FOR_VAD
-                return self.recognizer.transcribe(audio)
+                text = self.recognizer.transcribe(audio)
+                idx = text.lower().find(self.wake_word_lc)
+                if idx < 0:
+                    return text
+                idx += len(self.wake_word_lc)
+                while idx < len(text) and not text[idx].isalnum():
+                    idx += 1
+                return text[idx:]
             else:
                 self.recorded_frames.append(chunk)
             return ''
@@ -109,7 +117,7 @@ class AudioStreamWatcher:
             self.update_recent_frames(chunk)
             if vad_state == VADState.ATTACK:
                 self.next_wake_word_check_time = time.time() + .2
-                print("Listening for wake word")
+               # print("Listening for wake word")
                 self.state = State.LISTEN_FOR_WAKE_WORD
 
         if self.state == State.LISTEN_FOR_WAKE_WORD:
@@ -129,65 +137,52 @@ class AudioStreamWatcher:
 
     def check_for_wake_word(self, audio) -> bool:
         overheard = self.recognizer.transcribe(audio)
-        print(f"Overheard: '{overheard}'")
+       # print(f"Overheard: '{overheard}'")
         idx = overheard.lower().find(self.wake_word_lc)
         return idx >= 0
 
 
-def segment_text(text, max_words=60):
-    """
-    Splits text into segments of at most max_words, attempting to split at sentence boundaries.
-    """
-    words = text.split()
-    segments = []
-    while len(words) > max_words:
-        segment = " ".join(words[:max_words])
-        cutoff = max_words
-        for i, word in enumerate(segment.split()):
-            if word.endswith((".", "!", "?")):
-                cutoff = i + 1
-        segments.append(" ".join(words[:cutoff]).strip())
-        words = words[cutoff:]
-    if words:
-        segments.append(" ".join(words).strip())
-    return segments
+class TTS:
+    def __init__(self, config):
+        sample_rate = config["sample_rate"]
+        self.start_delay_ms = config["start_delay_ms"]
+        self.word_limit = config["max_words"]
+        self.audio_buffer = RingBuffer(capacity = sample_rate * 10, dtype = np.float32)
+        self.zero_buffer = np.zeros((sample_rate,), dtype=np.float32)
+        self.stream_paused = True
+        self.last_data_time = 0
+        self.buffering_size = int(sample_rate * config["buffer_duration_ms"] / 1000)
+        self.start_delay_ms = 500
 
 
-# TTS stream functions
-audio_buffer = RingBuffer(capacity=240000, dtype=np.float32)
-zero_buffer = np.zeros((24000,), dtype=np.float32)
-stream_paused = True
-last_data_time = 0
+    def audio_callback(self, outdata, frames, _, status):
+        if status:
+            print(status)
 
-def audio_callback(outdata, frames, _, status):
-    global audio_buffer
-    global stream_paused
+        available = len(self.audio_buffer)
+        time_since_last_push = (time.time_ns() - self.last_data_time) // 1000000
+        done_waiting = available and (available > self.buffering_size or time_since_last_push > self.start_delay_ms)
 
-    if status:
-        print(status)
-
-    available = len(audio_buffer)
-    time_since_last_push = time.time_ns() - last_data_time
-    done_waiting = available and (available > 24000 or time_since_last_push > 0.15)
-
-    if stream_paused and not done_waiting:
-        outdata[:, 0] = zero_buffer[:frames]
-    elif available < frames:
-        outdata[:, 0] = np.concatenate((audio_buffer[:available], zero_buffer[:frames - available]))
-        audio_buffer.clear()
-        stream_paused = True
-    else:
-        stream_paused = False
-        outdata[:, 0] = audio_buffer[:frames]
-        for i in range(frames):
-            audio_buffer.popleft()
+        if self.stream_paused and not done_waiting:
+            outdata[:, 0] = self.zero_buffer[:frames]
+        elif available < frames:
+            if time_since_last_push < 1000:
+                print(f"Playback underflow {available} frames left")
+            outdata[:, 0] = np.concatenate((self.audio_buffer[:available], self.zero_buffer[:frames - available]))
+            self.audio_buffer.clear()
+            self.stream_paused = True
+        else:
+            self.stream_paused = False
+            outdata[:, 0] = self.audio_buffer[:frames]
+            for _ in range(frames):
+                self.audio_buffer.popleft()
 
 
-def push_samples(samples, sample_rate):
-    global audio_buffer
-    global time_since_last_push
+    def push_samples(self, samples):
+        size_left = self.audio_buffer.maxlen - len(self.audio_buffer)
+        while len(samples) > size_left:
+            time.sleep(.1)
+            size_left = self.audio_buffer.maxlen - len(self.audio_buffer)
 
-    while len(audio_buffer) > sample_rate * 5:
-        time.sleep(0.05)
-    audio_buffer.extend(samples)
-    time_since_last_push = time.time_ns()
+        self.audio_buffer.extend(samples)
+        self.last_data_time = time.time_ns()
